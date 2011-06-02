@@ -2,7 +2,6 @@ minimongo
 =========
 
 :Info: Minimal database Model management for MongoDB.
-:Author: Steve Lacy (github@slacy.com)
 
 
 About
