@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-import copy
 
+import copy
 import re
+
 from bson import DBRef, ObjectId
+from pymongo import Connection
+
 from minimongo.collection import DummyCollection
 from minimongo.options import _Options
-from pymongo import Connection
 
 
 class ModelBase(type):

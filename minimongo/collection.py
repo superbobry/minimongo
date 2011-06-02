@@ -3,6 +3,7 @@
 from pymongo.collection import Collection as PyMongoCollection
 from pymongo.cursor import Cursor as PyMongoCursor
 
+
 class Cursor(PyMongoCursor):
 
     def __init__(self, *args, **kwargs):

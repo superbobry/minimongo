@@ -1,4 +1,7 @@
+# -*- coding: utf-8 -*-
+
 import types
+
 from minimongo.collection import Collection
 
 
