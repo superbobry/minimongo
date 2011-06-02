@@ -31,7 +31,8 @@ CLASSIFIERS = (
 class PyTest(Command):
     """Unfortunately :mod:`setuptools` support only :mod:`unittest`
     based tests, thus, we have to overider build-in ``test`` command
-    to run :mod:`pytest`."""
+    to run :mod:`pytest`.
+    """
     user_options = []
     initialize_options = finalize_options = lambda self: None
 
@@ -40,15 +41,13 @@ class PyTest(Command):
         raise SystemExit(errno)
 
 
-requires = ["pymongo"]
-
 setup(name="minimongo",
       version="0.2.6",
-      packages=find_packages(),
+      packages=find_packages(exclude=["tests"]),
       cmdclass={"test": PyTest},
       platforms=["any"],
 
-      install_requires = ["pymongo>=1.9"],
+      install_requires=["pymongo>=1.9"],
       zip_safe=False,
       include_package_data=True,
 
