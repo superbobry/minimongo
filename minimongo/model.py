@@ -109,36 +109,30 @@ class AttrDict(dict):
 
         super(AttrDict, self).__init__()
 
-    # These lines make this object behave both like a dict (x['y']) and like
-    # an object (x.y).  We have to translate from KeyError to AttributeError
-    # since model.undefined raises a KeyError and model['undefined'] raises
-    # a KeyError.  we don't ever want __getattr__ to raise a KeyError, so we
-    # 'translate' them below:
     def __getattr__(self, attr):
         try:
-            return super(AttrDict, self).__getitem__(attr)
-        except KeyError as excn:
-            raise AttributeError(excn)
+            return self[attr]
+        except KeyError:
+            raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
         try:
-            # Okay to set directly here, because we're not recursing.
             self[attr] = value
-        except KeyError as excn:
-            raise AttributeError(excn)
+        except KeyError:
+            raise AttributeError(attr)
 
-    def __delattr__(self, key):
+    def __delattr__(self, attr):
         try:
-            return super(AttrDict, self).__delitem__(key)
-        except KeyError as excn:
-            raise AttributeError(excn)
+            super(AttrDict, self).__delitem__(attr)
+        except KeyError:
+            raise AttributeError(attr)
 
     def __setitem__(self, key, value):
         # Coerce all nested dict-valued fields into AttrDicts
-        new_value = value
         if isinstance(value, dict):
-            new_value = AttrDict(value)
-        return super(AttrDict, self).__setitem__(key, new_value)
+            value = AttrDict(value)
+
+        super(AttrDict, self).__setitem__(key, value)
 
 
 class Model(AttrDict):
