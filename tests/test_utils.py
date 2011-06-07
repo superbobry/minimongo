@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+from types import ModuleType
+
 import pytest
 
 from minimongo.model import AttrDict, to_underscore
+from minimongo.meta import Meta, configure
 
 
 def test_to_underscore():
@@ -11,6 +14,56 @@ def test_to_underscore():
     assert to_underscore('Foo42Bar') == 'foo42_bar'
     assert to_underscore('FOOBar') == 'foo_bar'
     assert to_underscore('fooBAR') == 'foo_bar'
+
+
+def test_configure():
+    # a) keyword arguments
+    assert not hasattr(Meta, 'foo')
+    configure(foo='bar')
+    assert hasattr(Meta, 'foo')
+    del Meta.foo
+
+    # b) module
+    assert not hasattr(Meta, 'foo')
+    module = ModuleType('config')
+    module.MONGODB_FOO = 'bar'
+    module.NON_MONGO_ATTR = 'bar'
+    configure(foo='bar')
+    assert not hasattr(Meta, 'NON_MONGO_ATTR')
+    assert not hasattr(Meta, 'MONGODB_FOO')
+    assert hasattr(Meta, 'foo')
+    del Meta.foo
+
+    # c) nonmodule (fails silently)
+    try:
+        configure(42)
+        configure(None)
+        configure('foobar')
+    except Exception:
+        pytest.fail('configure() should fail silently on invalid input.')
+
+
+def test_options_init():
+    class RealMeta:
+        foo = 'bar'
+
+    options = Meta(RealMeta)
+    assert options.foo, 'bar'
+
+
+def test_optoins_configure():
+    # Options have no defaults yet  configure() was never called.
+    with pytest.raises(AttributeError):
+        Meta.foo
+
+    configure(foo='bar')
+
+    try:
+        assert Meta.foo == 'bar'
+    except AttributeError:
+        pytest.fail('Options.foo should\'ve been set.')
+
+    del Meta.foo
 
 
 def test_attr_dict():
