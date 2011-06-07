@@ -8,11 +8,12 @@
 '''
 from __future__ import unicode_literals, absolute_import
 
-__all__ = ('Collection', 'Index', 'Model', 'AttrDict', 'connect')
+__all__ = ('Collection', 'Index', 'Model', 'Rule', 'AttrDict', 'connect')
 
 from .index import Index
 from .collection import Collection
 from .model import AttrDict, Model, ModelBase
+from .meta import Rule
 
 
 def connect(database, host='localhost', port=27017):

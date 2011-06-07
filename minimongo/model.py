@@ -41,6 +41,8 @@ class ModelBase(type):
             meta.collection = meta.collection or to_underscore(name)
             if meta.auto_index and mcs.db:
                 new_class.auto_index()
+        else:
+            new_class._meta = None
 
         return new_class
 
@@ -158,6 +160,15 @@ class Model(AttrDict):
 
     def __unicode__(self):
         return str(self).decode('utf-8')
+
+    def __setitem__(self, key, value):
+        if self._meta and self._meta.field_map:
+            for rule in self._meta.field_map:
+                if rule.match(key, value):
+                   value = rule.converter(value)
+                   break
+
+        return super(Model, self).__setitem__(key, value)
 
     def dbref(self, with_database=True, **kwargs):
         """Returns a `DBRef` for this model.

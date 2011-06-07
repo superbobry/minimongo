@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import types
+from collections import namedtuple
 
 from minimongo.collection import Collection
 
@@ -28,9 +29,16 @@ def configure(module=None, prefix='MONGODB_', **kwargs):
         attrs = ((attr.replace(prefix, '').lower(), value)
                  for attr, value in attrs if attr.startwith(prefix))
 
-        Meta._configure(**dict(attrs))
+        Meta.configure(**dict(attrs))
     elif kwargs:
-        Meta._configure(**kwargs)
+        Meta.configure(**kwargs)
+
+
+#: Field convertion rule. `match` is a function, which checks if a
+#: `converter` function should be applied to a given field. `converter`
+#: *as already noted* takes current field value and returns a new
+#: one.
+Rule = namedtuple("Rule", "match converter")
 
 
 class Meta(object):
@@ -49,6 +57,9 @@ class Meta(object):
     #: access?
     auto_connect = True
 
+    #: A list of :class:`Rule` instances, used for type coercions.
+    field_map = []
+
     #: What is the base class for Collections.
     collection_class = Collection
 
@@ -63,4 +74,5 @@ class Meta(object):
     @classmethod
     def configure(cls, **defaults):
         """Updates class-level defaults for :class:`Meta` container."""
-        cls.__dict__.update(defaults)
+        for attr, value in defaults.iteritems():
+            setattr(cls, attr, value)

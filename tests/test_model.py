@@ -6,7 +6,7 @@ import operator
 import pytest
 
 from bson import DBRef
-from minimongo import Collection, Index, Model, connect
+from minimongo import Collection, Index, Model, Rule, connect
 from pymongo.errors import DuplicateKeyError
 
 
@@ -80,6 +80,16 @@ class TestModelInterface(Model):
 class TestModelImplementation(TestModelInterface):
     class Meta:
         collection = 'minimongo_impl'
+
+
+class TestFieldMapper(Model):
+    class Meta:
+        database = 'minimongo_test'
+        collection = 'minimongo_mapper'
+        field_map = [
+            Rule(lambda k, v: k == 'x' and isinstance(v, int),
+                 lambda v: float(v * (4.0 / 3.0)))
+        ]
 
 
 def test_meta():
@@ -452,3 +462,32 @@ def test_slicing():
     obj_list = list(objects[2:])
     assert obj_list == xs[2:]
     assert all(map(lambda x: isinstance(x, TestModel), obj_list))
+
+def test_field_mapper():
+    test_mapped_object = TestFieldMapper()
+    # x is going to be multiplied by 4/3 automatically.
+    test_mapped_object.x = 6
+    test_mapped_object.y = 7
+    test_mapped_object.z = 6.0
+    assert test_mapped_object.x == 8.0
+    assert test_mapped_object.y == 7
+    assert test_mapped_object.z == 6.0
+    assert type(test_mapped_object.x) == float
+    assert type(test_mapped_object.y) == int
+    assert type(test_mapped_object.z) == float
+    test_mapped_object.save()
+
+    loaded_mapped_object = TestFieldMapper.collection.find_one()
+
+    # When the object was loaded from the database, the mapper automatically
+    # multiplied every integer field by 4.0/3.0 and converted it to a float.
+    # This is a crazy use case only used for testing here.
+    assert test_mapped_object.x == 8.0
+    assert test_mapped_object.y == 7
+    assert test_mapped_object.z == 6.0
+
+    assert type(loaded_mapped_object.x) == float
+    assert type(test_mapped_object.x) == float
+
+    assert type(loaded_mapped_object.y) == int
+    assert type(loaded_mapped_object.z) == float
