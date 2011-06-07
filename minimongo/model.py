@@ -13,7 +13,7 @@ class NotConnected(Exception):
     """
 
 class ModelBase(type):
-    #: A reference to MongoDB connection (is set by :func:`connect`).
+    #: A reference to MongoDB connection (is set by :func:`.connect`).
     db = None
 
     def __new__(mcs, name, bases, attrs):
