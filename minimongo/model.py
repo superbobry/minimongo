@@ -1,24 +1,20 @@
 # -*- coding: utf-8 -*-
 
-import copy
 import re
 
 from bson import DBRef, ObjectId
-from pymongo import Connection
 
-from minimongo.collection import DummyCollection
-from minimongo.options import _Options
+from minimongo.meta import Meta
 
 
-class ModelBase(type):
-    """Metaclass for all models.
-
-    .. todo:: add Meta inheritance -- so that missing attributes are
-              populated from the parrent's Meta if any.
+class NotConnected(Exception):
+    """Exception raised, when :attr:`Model.collection` is accessed,
+    before :func:`.connect` has been called.
     """
 
-    # A very rudimentary connection pool.
-    _connections = {}
+class ModelBase(type):
+    #: A reference to MongoDB connection (is set by :func:`connect`).
+    db = None
 
     def __new__(mcs, name, bases, attrs):
         new_class = super(ModelBase,
@@ -36,45 +32,19 @@ class ModelBase(type):
         else:
             delattr(new_class, 'Meta')  # Won't need the original metadata
                                         # container anymore.
+        finally:
+            meta = Meta(meta)
 
-        options = _Options(meta)
-        options.collection = options.collection or to_underscore(name)
+        if not meta.abstract:
+            new_class._meta = meta
 
-        if options.interface:
-            new_class._meta = None
-            new_class.database = None
-            new_class.collection = DummyCollection
-            return new_class
-
-        if not (options.host and options.port and options.database):
-            raise Exception(
-                'Model %r improperly configured: %s %s %s' % (
-                    name, options.host, options.port, options.database))
-
-        # Checking connection pool for an existing connection.
-        hostport = options.host, options.port
-        if hostport in mcs._connections:
-            connection = mcs._connections[hostport]
-        else:
-            # _connect=False option
-            # creates :class:`pymongo.connection.Connection` object without
-            # establishing connection. It's required if there is no running
-            # mongodb at this time but we want to create :class:`Model`.
-            connection = Connection(*hostport, _connect=False)
-            mcs._connections[hostport] = connection
-
-        new_class._meta = options
-        new_class.connection = connection
-        new_class.database = connection[options.database]
-        new_class.collection = options.collection_class(
-            new_class.database, options.collection, document_class=new_class)
-
-        if options.auto_index:
-            new_class.auto_index()   # Generating required indices.
+            meta.collection = meta.collection or to_underscore(name)
+            if meta.auto_index and mcs.db:
+                new_class.auto_index()
 
         return new_class
 
-    def auto_index(mcs):
+    def auto_index(cls):
         """Builds all indices, listed in model's Meta class.
 
            >>> class SomeModel(Model)
@@ -88,15 +58,41 @@ class ModelBase(type):
                   method at import time, so import all your models up
                   front.
         """
-        for index in mcs._meta.indices:
-            index.ensure(mcs.collection)
+        for index in cls._meta.indices:
+            index.ensure(cls.collection)
+
+
+class Manager(object):
+    def __get__(self, instance, model=None):
+        if model.db is None:
+            raise NotConnected
+        elif instance is not None:
+            raise AttributeError("Manager isn't accessible from {0} instances."
+                                 .format(model))
+        elif not hasattr(model, "_meta"):
+            raise AttributeError("Manager isn't accessible from abstract models.")
+        else:
+            return model._meta.collection_class(
+                model.db, model._meta.collection, document_class=model)
 
 
 class AttrDict(dict):
+    """A dict with attribute access.
+
+    >>> d = AttrDict({"foo": "bar"}, baz=-1)
+    >>> d.foo
+    'bar'
+    >>> d.baz = 0
+    >>> d
+    {'foo': 'bar', 'baz': 0}
+
+    .. todo:: overriding :meth:`dict.__setitem__` is a really-**really**
+              bad idea, because all of the dict's methods will simply
+              ignore our `__setitem__` -- this needs to be fixed.
+    """
     def __init__(self, initial=None, **kwargs):
         # Make sure that during initialization, that we recursively apply
-        # AttrDict.  Maybe this could be better done with the builtin
-        # defaultdict?
+        # AttrDict.
         if initial:
             for key, value in initial.iteritems():
                 # Can't just say self[k] = v here b/c of recursion.
@@ -140,7 +136,6 @@ class Model(AttrDict):
 
     >>> class Foo(Model):
     ...     class Meta:
-    ...         database = 'somewhere'
     ...         indices = (
     ...             Index('bar', unique=True),
     ...         )
@@ -154,6 +149,9 @@ class Model(AttrDict):
 
     __metaclass__ = ModelBase
 
+    #: A Manager which handles all MongoDB interactions.
+    collection = Manager()
+
     def __str__(self):
         return '%s(%s)' % (self.__class__.__name__,
                            super(Model, self).__str__())
@@ -161,70 +159,35 @@ class Model(AttrDict):
     def __unicode__(self):
         return str(self).decode('utf-8')
 
-    def __setitem__(self, key, value):
-        # Go through the defined list of field mappers.  If the fild
-        # matches, then modify the field value by calling the function in
-        # the mapper.  Mapped fields must have a different type than their
-        # counterpart, otherwise they'll be mapped more than once as they
-        # come back in from a find() or find_one() call.
-        if self._meta and self._meta.field_map:
-            for matcher, mogrify in self._meta.field_map:
-                if matcher(key, value):
-                    new_value = mogrify(value)
-                    if type(new_value) == type(value):
-                        raise Exception(
-                            "Field mapper didn't change field type!")
-                    value = new_value
-
-        super(Model, self).__setitem__(key, value)
-
     def dbref(self, with_database=True, **kwargs):
-        """Returns a DBRef for the current object.
+        """Returns a `DBRef` for this model.
 
-        If `with_database` is False, the resulting :class:`pymongo.dbref.DBRef`
-        won't have a :attr:`database` field.
+        :param bool with_database: if `False`, the resulting
+                                   :class:`pymongo.dbref.DBRef` won't
+                                   have a :attr:`database` field.
 
-        Any other parameters will be passed to the DBRef constructor, as per
-        the mongo specs.
+        .. note:: Any additional keyword arguments will be passed to
+                  :class:`pymongo.dbref.DBRef` constructor, as per
+                  MongoDB specs.
         """
         if not hasattr(self, '_id'):
             self._id = ObjectId()
 
-        database = self._meta.database if with_database else None
+        if with_database:
+            database = self.__class__.collection.database.name
+        else:
+            database = None
+
         return DBRef(self._meta.collection, self._id, database, **kwargs)
 
-    def remove(self):
-        """Remove this object from the database."""
-        return self.collection.remove(self._id)
-
-    def mongo_update(self, values=None, **kwargs):
-        """Update database data with object data."""
-        # Allow to update external values as well as the model itself
-        if not values:
-            # Remove the _id and wrap self into a $set statement.
-            self_copy = copy.copy(self)
-            del self_copy._id
-            values = {'$set': self_copy}
-        self.collection.update({'_id': self._id}, values, **kwargs)
-
+    def remove(self, *args, **kwargs):
+        """Removes this model from the related collection."""
+        self.__class__.collection.remove(self._id, *args, **kwargs)
         return self
 
     def save(self, *args, **kwargs):
-        """Save this object to it's mongo collection."""
-        self.collection.save(self, *args, **kwargs)
-        return self
-
-    def load(self, fields=None, **kwargs):
-        """Allow partial loading of a document.
-        :attr:fields is a dictionary as per the pymongo specs
-
-        self.collection.find_one( self._id, fields={'name': 1} )
-
-        """
-        values = self.collection.find_one({'_id': self._id},
-                                          fields=fields, **kwargs)
-        # Merge the loaded values with whatever is currently in self.
-        self.update(values)
+        """Saves this model from the related collection."""
+        self.__class__.collection.save(self, *args, **kwargs)
         return self
 
 

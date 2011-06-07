@@ -6,8 +6,22 @@ import operator
 import pytest
 
 from bson import DBRef
-from minimongo import Collection, Index, Model
+from minimongo import Collection, Index, Model, connect
 from pymongo.errors import DuplicateKeyError
+
+
+def setup_function(func):
+    connect('minimongo_test')
+
+    for model in Model.__subclasses__() + [TestDerivedModel,
+                                           TestModelImplementation]:
+        try:
+            model.collection.drop()
+        except AttributeError:
+            continue
+
+    TestModel.auto_index()
+    TestModelUnique.auto_index()
 
 
 class TestCollection(Collection):
@@ -18,7 +32,6 @@ class TestCollection(Collection):
 class TestModel(Model):
     '''Model class for test cases.'''
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_test'
         indices = (
             Index('x'),
@@ -33,14 +46,12 @@ class TestModel(Model):
 class TestModelCollection(Model):
     '''Model class with a custom collection class.'''
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_collection'
         collection_class = TestCollection
 
 
 class TestModelUnique(Model):
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_unique'
         indices = (
             Index('x', unique=True),
@@ -49,13 +60,11 @@ class TestModelUnique(Model):
 
 class TestDerivedModel(TestModel):
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_derived'
 
 
 class TestNoAutoIndexModel(Model):
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_noidex'
         indices = (
             Index('x'),
@@ -65,37 +74,12 @@ class TestNoAutoIndexModel(Model):
 
 class TestModelInterface(Model):
     class Meta:
-        interface = True
+        abstract = True
 
 
 class TestModelImplementation(TestModelInterface):
     class Meta:
-        database = 'minimongo_test'
         collection = 'minimongo_impl'
-
-
-class TestFieldMapper(Model):
-    class Meta:
-        database = 'minimongo_test'
-        collection = 'minimongo_mapper'
-        field_map = (
-            (lambda k, v: k == 'x' and isinstance(v, int),
-             lambda v: float(v * (4.0 / 3.0))),
-        )
-
-
-def setup():
-    # Make sure we start with a clean, empty DB.
-    TestModel.connection.drop_database(TestModel.database)
-
-    # Create indices up front
-    TestModel.auto_index()
-    TestModelUnique.auto_index()
-
-
-def teardown():
-    # This will drop the entire minimongo_test database.  Careful!
-    TestModel.connection.drop_database(TestModel.database)
 
 
 def test_meta():
@@ -104,11 +88,9 @@ def test_meta():
 
     meta = TestModel._meta
 
-    for attr in ('host', 'port', 'indices', 'database',
-                 'collection', 'collection_class'):
+    for attr in ('indices', 'collection', 'collection_class'):
         assert hasattr(meta, attr)
 
-    assert meta.database == 'minimongo_test'
     assert meta.collection == 'minimongo_test'
     assert meta.indices == (Index('x'), )
 
@@ -165,76 +147,13 @@ def test_save_with_arguments():
     # Manipulate is what inserts the _id on save if it is missing
     model = TestModel(foo=0)
     model.save(manipulate=False)
+
     with pytest.raises(AttributeError):
-        _value = model._id
+        model._id
+
     # but the object was actually saved
     model = TestModel.collection.find_one({'foo': 0})
     assert model.foo == 0
-
-
-def test_mongo_update():
-    """Test update. note that update does not sync back the server copy."""
-    model = TestModel(counter=10, x=0, y=1)
-    model.save()
-
-    # NOTE: These tests below could be thought of outlining existing
-    # edge-case behavior (i.e. they're bugs) and they should be fixed and
-    # the behavior made more correct/consistent.
-
-    # Update will not delete missing attributes, so at this point our
-    # local copy is out of sync with what's on the server.
-    model.y = 1
-    del model.x
-    model.update()
-    assert model.get('x', 'foo') == 'foo'
-
-    # $inc changes the server, not the local copy.
-    model.mongo_update({'$inc': {'counter': 1}})
-    assert model.counter == 10
-
-    # reload the model.  This will pull in the "true" document from the server.
-    model = TestModel.collection.find_one({'_id': model._id})
-    assert model.counter == 11
-    assert model.x == 0
-    assert model.y == 1
-
-
-def test_load():
-    """Partial loading of documents.x"""
-    # object_a and object_b are 2 instances of the same document
-    object_a = TestModel(x=0, y=1).save()
-    object_b = TestModel(_id=object_a._id)
-    with pytest.raises(AttributeError):
-        _value = object_b.x
-    # Partial load. only the x value
-    object_b.load(fields={'x': 1})
-    assert object_b.x == object_a.x
-    with pytest.raises(AttributeError):
-        _value = object_b.y
-
-    # Complete load. change the value first
-    object_a.x = 2
-    object_a.save()
-    object_b.load()
-    assert object_b.x == 2
-    assert object_b.y == object_a.y
-
-
-def test_load_and_field_mapper():
-    object_a = TestFieldMapper(x=12, y=1).save()
-    object_b = TestFieldMapper(_id=object_a._id)
-
-    # X got mapped (multiplied by 4/3 and converted to object_a float)
-    assert object_a.x == 16.0
-    assert object_a.y == 1
-
-    object_b.load(fields={'x': 1})
-    assert object_b.x == 16.0
-    with pytest.raises(AttributeError):
-        _value = object_b.y  # object_b does not have the 'y' field
-
-    object_b.load()
-    assert object_b.y == 1
 
 
 def test_index_existance():
@@ -274,28 +193,23 @@ def test_unique_constraint():
 
 def test_queries():
     '''Test some more complex query forms.'''
-    object_a = TestModel({'x': 1, 'y': 1}).save()
-    object_b = TestModel({'x': 1, 'y': 2}).save()
-    object_c = TestModel({'x': 2, 'y': 2}).save()
-    object_d = TestModel({'x': 2, 'y': 1}).save()
+    a, b, c, d = [
+        TestModel({'x': 1, 'y': 1}).save(),
+        TestModel({'x': 1, 'y': 2}).save(),
+        TestModel({'x': 2, 'y': 2}).save(),
+        TestModel({'x': 2, 'y': 1}).save()
+    ]
 
-    found_x1 = TestModel.collection.find({'x': 1})
-    found_y1 = TestModel.collection.find({'y': 1})
-    found_x2y2 = TestModel.collection.find({'x': 2, 'y': 2})
-
-    list_x1 = list(found_x1)
-    list_y1 = list(found_y1)
-    list_x2y2 = list(found_x2y2)
+    x1 = list(TestModel.collection.find({'x': 1}))
+    y1 = list(TestModel.collection.find({'y': 1}))
+    x2y2 = list(TestModel.collection.find({'x': 2, 'y': 2}))
 
     # make sure the types of the things coming back from find() are the
     # derived Model types, not just a straight dict.
-    assert isinstance(list_x1[0], TestModel)
-
-    assert object_a in list_x1
-    assert object_b in list_x1
-    assert object_a in list_y1
-    assert object_d in list_y1
-    assert object_c == list_x2y2[0]
+    assert all(map(lambda x: isinstance(x, TestModel), x1 + y1 + x2y2))
+    assert x1 == [a, b]
+    assert y1 == [a, d]
+    assert x2y2 == [c]
 
 
 def test_deletion():
@@ -354,11 +268,11 @@ def test_complex_types():
 
 
 def test_type_from_cursor():
-    object_a = TestModel({'x':1}).save()
-    object_b = TestModel({'x':2}).save()
-    object_c = TestModel({'x':3}).save()
-    object_d = TestModel({'x':4}).save()
-    object_e = TestModel({'x':5}).save()
+    TestModel({'x':1}).save()
+    TestModel({'x':2}).save()
+    TestModel({'x':3}).save()
+    TestModel({'x':4}).save()
+    TestModel({'x':5}).save()
 
     objects = TestModel.collection.find()
     for single_object in objects:
@@ -447,28 +361,22 @@ def test_dbref():
 
 
 def test_db_and_collection_names():
-    '''Test the methods that return the current class's DB and
-    Collection names.'''
-    object_a = TestModel({'x': 1})
-    assert object_a.database.name == 'minimongo_test'
-    assert TestModel.database.name == 'minimongo_test'
-    assert object_a.collection.name == 'minimongo_test'
     assert TestModel.collection.name == 'minimongo_test'
+    assert TestModelCollection.collection.name == 'minimongo_collection'
 
 
 def test_derived():
-    '''Test Models that are derived from other models.'''
+    [m.remove() for m in TestDerivedModel.collection.find()]
+
     derived_object = TestDerivedModel()
     derived_object.a_method()
 
-    assert derived_object.database.name == 'minimongo_test'
-    assert derived_object.collection.name == 'minimongo_derived'
-
+    assert derived_object.__class__.collection.name == 'minimongo_derived'
     assert TestDerivedModel.collection.find_one({'x': 123}) == derived_object
 
 
 def test_collection_class():
-    model = TestModelCollection()
+    model = TestModelCollection
 
     assert isinstance(model.collection, TestCollection)
     assert hasattr(model.collection, 'custom')
@@ -493,12 +401,11 @@ def test_str_and_unicode():
 def test_auto_collection_name():
     try:
         class SomeModel(Model):
-            class Meta:
-                database = 'minimongo_test'
+            pass
     except Exception:
         pytest.fail('`collection_name` should\'ve been constructed.')
 
-    assert SomeModel.collection.name == 'some_model'
+    assert SomeModel._meta.collection == 'some_model'
 
 
 def test_no_auto_index():
@@ -517,7 +424,8 @@ def test_no_auto_index():
 def test_interface_models():
     test_interface_instance = TestModelInterface()
     test_interface_instance.x = 5
-    with pytest.raises(Exception):
+
+    with pytest.raises(AttributeError):
         test_interface_instance.save()
 
     test_model_instance = TestModelImplementation()
@@ -529,53 +437,18 @@ def test_interface_models():
     assert test_model_instance == test_model_instance_2
 
 
-def test_field_mapper():
-    test_mapped_object = TestFieldMapper()
-    # x is going to be multiplied by 4/3 automatically.
-    test_mapped_object.x = 6
-    test_mapped_object.y = 7
-    test_mapped_object.z = 6.0
-    assert test_mapped_object.x == 8.0
-    assert test_mapped_object.y == 7
-    assert test_mapped_object.z == 6.0
-    assert type(test_mapped_object.x) == float
-    assert type(test_mapped_object.y) == int
-    assert type(test_mapped_object.z) == float
-    test_mapped_object.save()
-
-    loaded_mapped_object = TestFieldMapper.collection.find_one()
-
-    # When the object was loaded from the database, the mapper automatically
-    # multiplied every integer field by 4.0/3.0 and converted it to a float.
-    # This is a crazy use case only used for testing here.
-    assert test_mapped_object.x == 8.0
-    assert test_mapped_object.y == 7
-    assert test_mapped_object.z == 6.0
-
-    assert type(loaded_mapped_object.x) == float
-    assert type(test_mapped_object.x) == float
-
-    assert type(loaded_mapped_object.y) == int
-    assert type(loaded_mapped_object.z) == float
-
-
 def test_slicing():
-    object_a = TestModel({'x': 1}).save()
-    object_b = TestModel({'x': 2}).save()
-    object_c = TestModel({'x': 3}).save()
-    object_d = TestModel({'x': 4}).save()
-    object_e = TestModel({'x': 5}).save()
+    xs = []
+    for x in xrange(5):
+        xs.append(TestModel(x=x).save())
 
     objects = TestModel.collection.find().sort('x')
     obj_list = list(objects[:2])
-    assert obj_list == [object_a, object_b]
-    assert type(obj_list[0]) == TestModel
-    assert type(obj_list[1]) == TestModel
+    assert obj_list == xs[:2]
+    assert all(map(lambda x: isinstance(x, TestModel), obj_list))
 
     # We can't re-slice an already sliced cursor, so we query again.
     objects = TestModel.collection.find().sort('x')
     obj_list = list(objects[2:])
-    assert obj_list == [object_c, object_d, object_e]
-    assert type(obj_list[0] == TestModel)
-    assert type(obj_list[1] == TestModel)
-    assert type(obj_list[2] == TestModel)
+    assert obj_list == xs[2:]
+    assert all(map(lambda x: isinstance(x, TestModel), obj_list))
