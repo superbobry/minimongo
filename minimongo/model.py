@@ -175,6 +175,9 @@ class Model(AttrDict):
 
     __metaclass__ = ModelBase
 
+    #: A proxy to the related MongoDB collection, which is either
+    #: constructed from class name ``class Foo: -- "foo"`` or set
+    #: explicitly in the :class:`.meta.Meta` class.
     collection = CollectionDescriptor()
 
     def __str__(self):

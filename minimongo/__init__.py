@@ -8,16 +8,33 @@
 '''
 from __future__ import unicode_literals, absolute_import
 
-__all__ = ('Collection', 'Index', 'Model', 'Rule', 'AttrDict', 'connect')
+__all__ = ['connect', 'configure',
+           'Model', 'Index', 'Rule', 'AttrDict',
+           'NotConnected']
 
 from .index import Index
 from .collection import Collection
-from .model import AttrDict, Model, ModelBase
-from .meta import Rule
+from .model import AttrDict, Model, ModelBase, NotConnected
+from .meta import Rule, configure
 
 
 def connect(database, host='localhost', port=27017, lazy=True):
     """Creates a module-wide connection to MongoDB.
+
+    >>> c =connect("foo", lazy=False)
+    Database(Connection(u'localhost', 27017), u'foo')
+    >>> c = connect("foo")
+    Database(Connection(None, None), u'foo')
+
+    Note, that in the latter example we got a "lazy" connection, which
+    has not yet been initialized -- but once we access any of the
+    :class:`.collection.Collection` methods the connection is
+    established:
+
+    >>> c.collection_names()
+    [u'bar', u'system.indexes']
+    >>> c
+    Database(Connection(u'localhost', 27017), u'foo')
 
     :param unicode database: database name to connect to.
     :param unicode host: MongoDB server hostname.

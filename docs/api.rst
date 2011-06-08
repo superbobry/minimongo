@@ -2,16 +2,23 @@
 API
 ===
 
-.. currentmodule:: minimongo
+.. autofunction:: minimongo.connect
+.. autofunction:: minimongo.configure
 
+.. autoexception:: minimongo.NotConnected
 
-.. autofunction:: configure
+.. autoclass:: minimongo.Model
+     :members:
+     :inherited-members:
 
-.. autoclass:: Collection
-      :members: document_class, find, find_one, from_dbref
+.. autoclass:: minimongo.model.AttrDict
+     :members:
+     :inherited-members:
 
-.. autoclass:: Model
-      :members: dbref, auto_index, save, remove, mongo_update
+.. autoclass:: minimongo.index.Index
+     :members:
 
-.. autoclass:: Index
-      :members: __eq__, ensure
+.. autoclass:: minimongo.Rule
+
+.. autoclass:: minimongo.meta.Meta
+     :members:
