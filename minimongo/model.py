@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import re
+from abc import ABCMeta
+from collections import MutableMapping
 
 from bson import DBRef, ObjectId
 
@@ -12,7 +14,23 @@ class NotConnected(Exception):
     before :func:`.connect` has been called.
     """
 
-class ModelBase(type):
+
+class CollectionDescriptor(object):
+    def __get__(self, instance, model=None):
+        if model.db is None:
+            raise NotConnected
+        elif instance is not None:
+            raise AttributeError("Collection isn't accessible from {0} "
+                                 "instances.".format(model))
+        elif not hasattr(model, "_meta"):
+            raise AttributeError("Manager isn't accessible from abstract "
+                                 "models.")
+        else:
+            return model._meta.collection_class(
+                model.db, model._meta.collection, document_class=model)
+
+
+class ModelBase(ABCMeta):
     #: A reference to MongoDB connection (is set by :func:`.connect`).
     db = None
 
@@ -64,21 +82,7 @@ class ModelBase(type):
             index.ensure(cls.collection)
 
 
-class Manager(object):
-    def __get__(self, instance, model=None):
-        if model.db is None:
-            raise NotConnected
-        elif instance is not None:
-            raise AttributeError("Manager isn't accessible from {0} instances."
-                                 .format(model))
-        elif not hasattr(model, "_meta"):
-            raise AttributeError("Manager isn't accessible from abstract models.")
-        else:
-            return model._meta.collection_class(
-                model.db, model._meta.collection, document_class=model)
-
-
-class AttrDict(dict):
+class AttrDict(MutableMapping):
     """A dict with attribute access.
 
     >>> d = AttrDict({"foo": "bar"}, baz=-1)
@@ -87,25 +91,26 @@ class AttrDict(dict):
     >>> d.baz = 0
     >>> d
     {'foo': 'bar', 'baz': 0}
-
-    .. todo:: overriding :meth:`dict.__setitem__` is a really-**really**
-              bad idea, because all of the dict's methods will simply
-              ignore our `__setitem__` -- this needs to be fixed.
     """
+
     def __init__(self, initial=None, **kwargs):
-        # Make sure that during initialization, that we recursively apply
-        # AttrDict.
+        self.__dict__["_container"] = {}
+
         if initial:
-            for key, value in initial.iteritems():
-                # Can't just say self[k] = v here b/c of recursion.
-                self.__setitem__(key, value)
+            self.update(initial)
+        if kwargs:
+            self.update(kwargs)
 
-        # Process the other arguments (assume they are also default values).
-        # This is the same behavior as the regular dict constructor.
-        for key, value in kwargs.iteritems():
-            self.__setitem__(key, value)
+    for method in ["__iter__", "__repr__", "__str__", "__len__",
+                   "__getitem__", "__delitem__"]:
+        exec("{method} = lambda self, *args: self._container.{method}(*args)"
+             .format(**locals()))
 
-        super(AttrDict, self).__init__()
+    def __setitem__(self, key, value):
+        if isinstance(value, dict):
+            value = AttrDict(value)
+
+        self._container[key] = value
 
     def __getattr__(self, attr):
         try:
@@ -114,23 +119,15 @@ class AttrDict(dict):
             raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
-        try:
-            self[attr] = value
-        except KeyError:
-            raise AttributeError(attr)
+        self[attr] = value
 
     def __delattr__(self, attr):
         try:
-            super(AttrDict, self).__delitem__(attr)
+            del self[attr]
         except KeyError:
             raise AttributeError(attr)
 
-    def __setitem__(self, key, value):
-        # Coerce all nested dict-valued fields into AttrDicts
-        if isinstance(value, dict):
-            value = AttrDict(value)
-
-        super(AttrDict, self).__setitem__(key, value)
+MutableMapping.register(AttrDict)
 
 
 class Model(AttrDict):
@@ -151,15 +148,11 @@ class Model(AttrDict):
 
     __metaclass__ = ModelBase
 
-    #: A Manager which handles all MongoDB interactions.
-    collection = Manager()
+    collection = CollectionDescriptor()
 
     def __str__(self):
         return '%s(%s)' % (self.__class__.__name__,
                            super(Model, self).__str__())
-
-    def __unicode__(self):
-        return str(self).decode('utf-8')
 
     def __setitem__(self, key, value):
         if self._meta and self._meta.field_map:
@@ -168,7 +161,7 @@ class Model(AttrDict):
                    value = rule.converter(value)
                    break
 
-        return super(Model, self).__setitem__(key, value)
+        super(Model, self).__setitem__(key, value)
 
     def dbref(self, with_database=True, **kwargs):
         """Returns a `DBRef` for this model.
@@ -196,9 +189,16 @@ class Model(AttrDict):
         self.__class__.collection.remove(self._id, *args, **kwargs)
         return self
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         """Saves this model from the related collection."""
-        self.__class__.collection.save(self, *args, **kwargs)
+        _id = self.__class__.collection.save(dict(self), **kwargs)
+
+        # Thanks to the nice ternary operator fail in Pymongo -- we have
+        # to check that ourselves.
+        if isinstance(_id, list): _id = _id[0]
+
+        if _id is not None:
+            self.update(_id=_id)
         return self
 
 

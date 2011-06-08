@@ -2,23 +2,18 @@
 from __future__ import with_statement
 
 import operator
+from collections import Mapping
 
 import pytest
 
 from bson import DBRef
-from minimongo import Collection, Index, Model, Rule, connect
+from minimongo import Collection, Index, Model, Rule, AttrDict, connect
 from pymongo.errors import DuplicateKeyError
 
 
 def setup_function(func):
-    connect('minimongo_test')
-
-    for model in Model.__subclasses__() + [TestDerivedModel,
-                                           TestModelImplementation]:
-        try:
-            model.collection.drop()
-        except AttributeError:
-            continue
+    collection = connect('minimongo_test', lazy=False)
+    collection.connection.drop_database('minimongo_test')
 
     TestModel.auto_index()
     TestModelUnique.auto_index()
@@ -255,43 +250,31 @@ def test_complex_types():
     # Make sure the internal lists are equivalent.
     assert object_a.l == object_b.l
 
-    # Make sure that everything is of the right type, including the types of
-    # the nested fields that we read back from the DB, and that we are able
-    # to access fields as both attrs and items.
-    assert type(object_a) == type(object_b) == TestModel
-    assert isinstance(object_a.y, dict)
-    assert isinstance(object_b.y, dict)
-    assert isinstance(object_a['z'], dict)
-    assert isinstance(object_b['z'], dict)
-    assert isinstance(object_a.z, dict)
-    assert isinstance(object_b.z, dict)
-
-    # These nested fields are actually instances of AttrDict, which is why
-    # we can access as both attributes and values.  Thus, the "isinstance"
-    # dict check.
-    assert isinstance(object_a['z']['s'], dict)
-    assert isinstance(object_b['z']['s'], dict)
-    assert isinstance(object_a.z.s, dict)
-    assert isinstance(object_b.z.s, dict)
+    # Make sure that everything is of the right type, including the
+    # types of the nested fields that we read back from the DB, and
+    # that we are able to access fields as both attrs and items.
+    assert all(map(lambda o: isinstance(o, TestModel), [object_a, object_b]))
+    assert all(map(lambda o: isinstance(o, AttrDict), [
+        object_a.y,
+        object_b.y,
+        object_a.z,
+        object_b.z,
+        object_a['z'],
+        object_b['z'],
+    ]))
 
     assert object_a == object_b
 
 
 def test_type_from_cursor():
-    TestModel({'x':1}).save()
-    TestModel({'x':2}).save()
-    TestModel({'x':3}).save()
-    TestModel({'x':4}).save()
-    TestModel({'x':5}).save()
+    for x in xrange(5):
+        TestModel({'x': x}).save()
 
     objects = TestModel.collection.find()
     for single_object in objects:
-        assert type(single_object) == TestModel
-        # Make sure it's both a dict and a TestModel, which is also an object
-        assert isinstance(single_object, dict)
-        assert isinstance(single_object, object)
+        assert isinstance(single_object, Mapping)
         assert isinstance(single_object, TestModel)
-        assert type(single_object['x']) == int
+        assert isinstance(single_object['x'], int)
 
 
 def test_delete_field():

@@ -37,7 +37,6 @@ class Collection(PyMongoCollection):
         self.document_class = kwargs.pop('document_class')
         super(Collection, self).__init__(*args, **kwargs)
 
-
     def find(self, *args, **kwargs):
         """Same as :meth:`pymongo.collection.Collection.find`, except
         it returns the right document class.
