@@ -42,7 +42,7 @@ class PyTest(Command):
 
 
 setup(name="minimongo",
-      version="0.2.6",
+      version="0.2.7",
       packages=find_packages(exclude=["tests"]),
       cmdclass={"test": PyTest},
       platforms=["any"],
