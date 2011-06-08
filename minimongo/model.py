@@ -91,6 +91,21 @@ class AttrDict(MutableMapping):
     >>> d.baz = 0
     >>> d
     {'foo': 'bar', 'baz': 0}
+
+    Note, that even though ``AttrDict`` looks and behaves exactly like
+    a :func:`dict` -- it's in fact a concrete
+    :class:`collections.MutableMapping` implementation.
+
+    >>> isinstance(AttrDict(), dict)
+    False
+    >>> issubclass(AttrDict, dict)
+    False
+
+    However, if you need a **read-only** "dicty" version of an
+    ``AttrDict``, use :attr:`container` attribute:
+
+    >>> isintance(AttrDict().container, dict)
+    True
     """
 
     def __init__(self, initial=None, **kwargs):
@@ -126,6 +141,18 @@ class AttrDict(MutableMapping):
             del self[attr]
         except KeyError:
             raise AttributeError(attr)
+
+    def _get_container(self):
+        data = {}
+        for key, value in self.iteritems():
+            if isinstance(value, AttrDict):
+                value = value.container
+
+            data[key] = value
+
+        return data
+    container = property(_get_container,
+        doc="""A **read-only** version of ``AttrDict`` contents.""")
 
 MutableMapping.register(AttrDict)
 
@@ -191,7 +218,7 @@ class Model(AttrDict):
 
     def save(self, **kwargs):
         """Saves this model from the related collection."""
-        _id = self.__class__.collection.save(dict(self), **kwargs)
+        _id = self.__class__.collection.save(self.container, **kwargs)
 
         # Thanks to the nice ternary operator fail in Pymongo -- we have
         # to check that ourselves.
