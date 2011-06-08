@@ -4,8 +4,7 @@ from collections import Mapping
 
 import pytest
 
-from minimongo.model import AttrDict, to_underscore
-from minimongo.meta import Meta, configure
+from minimongo import AttrDict, Meta, to_underscore, configure
 
 
 def test_to_underscore():
