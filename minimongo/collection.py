@@ -69,26 +69,3 @@ class Collection(PyMongoCollection):
             raise ValueError('DBRef points to an invalid database.')
         else:
             return self.find_one(dbref.id)
-
-
-class DummyCollection(object):
-    @classmethod
-    def drop(*args, **kwargs):
-        # It's okay to drop this bogus collection for convenience's sake.
-        # We might actually want to find all classes derived from this guy
-        # and drop all those models here.
-        pass
-
-    @classmethod
-    def save(*args, **kwargs):
-        raise Exception("Can't save on an interface collection")
-
-    @classmethod
-    def find(*args, **kwargs):
-        # Union-find over all models derived from this one?
-        raise Exception("Can't find on an interface collection")
-
-    @classmethod
-    def find_one(*args, **kwargs):
-        # Union-find over all models derived from this one?
-        raise Exception("Can't find_one on an interface collection")
