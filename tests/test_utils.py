@@ -229,3 +229,11 @@ def test_attr_dict_derived():
     assert test_derived_too['old_items'] == set(['x', 'y', 'z', 'f'])
     assert test_derived_too.old_attrs == set(['f'])
     assert test_derived_too['old_attrs'] == set(['f'])
+
+
+def test_attr_dict_pickle():
+    import cPickle
+
+    d = AttrDict({"foo": "bar"})
+
+    assert cPickle.loads(cPickle.dumps(d)) == d

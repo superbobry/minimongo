@@ -305,6 +305,9 @@ class AttrDict(MutableMapping):
         exec("{method} = lambda self, *args: self._container.{method}(*args)"
              .format(**locals()))
 
+    def __setstate__(self, state):
+        self.__dict__.setdefault("_container", state.get("_container", {}))
+
     def __setitem__(self, key, value):
         if isinstance(value, dict):
             value = AttrDict(value)
